@@ -22,7 +22,7 @@ byte BRIGHTNESS = 200;      // яркость по умолчанию (0 - 255)
 #define SOUND_R A2         // аналоговый пин вход аудио, правый канал
 #define SOUND_L A1         // аналоговый пин вход аудио, левый канал
 #define SOUND_R_FREQ A3    // аналоговый пин вход аудио для режима с частотами (через кондер)
-#define BTN_PIN 3          // кнопка переключения режимов (PIN --- КНОПКА --- GND)
+// #define BTN_PIN 3          // кнопка переключения режимов (PIN --- КНОПКА --- GND)
 
 #if defined(__AVR_ATmega32U4__) // Пины для Arduino Pro Micro (смотри схему для Pro Micro на странице проекта!!!)
 #define MLED_PIN 17             // пин светодиода режимов на ProMicro, т.к. обычный не выведен.
@@ -185,8 +185,8 @@ float freq_to_stripe = NUM_LEDS / 40; // /2 так как симметрия, и
 #include "FastLED.h"
 CRGB leds[NUM_LEDS];
 
-#include "GyverButton.h"
-GButton butt1(BTN_PIN);
+// #include "GyverButton.h"
+// GButton butt1(BTN_PIN);
 
 #include "IRLremote.h"
 CHashIR IRLremote;
@@ -251,7 +251,7 @@ void setup() {
 
   pinMode(POT_GND, OUTPUT);
   digitalWrite(POT_GND, LOW);
-  butt1.setTimeout(900);
+  // butt1.setTimeout(900);
 
   IRLremote.begin(IR_PIN);
 
@@ -321,7 +321,7 @@ void setup() {
 }
 
 void loop() {
-  buttonTick();     // опрос и обработка кнопки
+  // buttonTick();     // опрос и обработка кнопки
 #if REMOTE_TYPE != 0
   remoteTick();     // опрос ИК пульта
 #endif
@@ -895,15 +895,16 @@ void analyzeAudio() {
   fht_mag_log(); // take the output of the fht
 }
 
-void buttonTick() {
-  butt1.tick();  // обязательная функция отработки. Должна постоянно опрашиваться
-  if (butt1.isSingle())                              // если единичное нажатие
-    if (++this_mode >= MODE_AMOUNT) this_mode = 0;   // изменить режим
+// void buttonTick() {
+//   butt1.tick();  // обязательная функция отработки. Должна постоянно опрашиваться
+//   if (butt1.isSingle())                              // если единичное нажатие
+//     if (++this_mode >= MODE_AMOUNT) this_mode = 0;   // изменить режим
 
-  if (butt1.isHolded()) {     // кнопка удержана
-    fullLowPass();
-  }
-}
+//   if (butt1.isHolded()) {     // кнопка удержана
+//     fullLowPass();
+//   }
+// }
+
 void fullLowPass() {
   digitalWrite(MLED_PIN, MLED_ON);   // включить светодиод
   FastLED.setBrightness(0); // погасить ленту
