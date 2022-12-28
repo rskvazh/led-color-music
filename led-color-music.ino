@@ -41,7 +41,7 @@ byte BRIGHTNESS = 255;      // яркость по умолчанию (0 - 255)
 float RAINBOW_STEP = 5.00;         // шаг изменения цвета радуги
 
 // ----- отрисовка
-#define MODE 0                    // режим при запуске
+#define MODE 6                    // режим при запуске
 #define MAIN_LOOP 5               // период основного цикла отрисовки (по умолчанию 5)
 
 // ----- сигнал
@@ -225,7 +225,8 @@ int thisBright[3], strobe_bright = 0;
 unsigned int light_time = STROBE_PERIOD * STROBE_DUTY / 100;
 volatile boolean ir_flag;
 boolean settings_mode, ONstate = true;
-int8_t freq_strobe_mode, light_mode;
+int8_t freq_strobe_mode;
+int8_t light_mode = 2;
 int freq_max;
 float freq_max_f, rainbow_steps;
 int freq_f[32];
