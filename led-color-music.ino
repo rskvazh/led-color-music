@@ -3,6 +3,21 @@
   More info: https://alexgyver.ru/colormusic/
 */
 
+/*
+  MODES:
+  1: градиент плавающий (скорость меняем)
+  2:
+  3:
+  4:
+  5:
+  6:
+  7:
+  8:
+  9:
+
+  Кнопка 0: fullLowPass() для микрофона
+*/
+
 // ----- настройка ИК пульта
 #define REMOTE_TYPE 1       // 0 - без пульта, 1 - пульт от WAVGAT, 2 - пульт от KEYES, 3 - кастомный пульт
 // система может работать С ЛЮБЫМ ИК ПУЛЬТОМ (практически). Коды для своего пульта можно задать начиная со строки 160 в прошивке. Коды пультов определяются скетчем IRtest_2.0, читай инструкцию
@@ -14,7 +29,8 @@
 #define SETTINGS_LOG 0      // вывод всех настроек из EEPROM в порт при запуске
 
 // ----- настройки ленты
-#define NUM_LEDS 467
+// #define NUM_LEDS 467 // Production
+#define NUM_LEDS 120
 
 #define CURRENT_LIMIT 0  // лимит по току в МИЛЛИАМПЕРАХ, автоматически управляет яркостью (пожалей свой блок питания!) 0 - выключить лимит
 byte BRIGHTNESS = 255;      // яркость по умолчанию (0 - 255)
@@ -25,15 +41,9 @@ byte BRIGHTNESS = 255;      // яркость по умолчанию (0 - 255)
 #define SOUND_R_FREQ A3    // аналоговый пин вход аудио для режима с частотами (через кондер)
 // #define BTN_PIN 3          // кнопка переключения режимов (PIN --- КНОПКА --- GND)
 
-#if defined(__AVR_ATmega32U4__) // Пины для Arduino Pro Micro (смотри схему для Pro Micro на странице проекта!!!)
-#define MLED_PIN 17             // пин светодиода режимов на ProMicro, т.к. обычный не выведен.
-#define MLED_ON LOW
-#define LED_PIN 9               // пин DI светодиодной ленты на ProMicro, т.к. обычный не выведен.
-#else                           // Пины для других плат Arduino (по умолчанию)
 #define MLED_PIN 13             // пин светодиода режимов
 #define MLED_ON HIGH
 #define LED_PIN 12              // пин DI светодиодной ленты
-#endif
 
 #define POT_GND A0              // пин земля для потенциометра
 #define IR_PIN 2                // пин ИК приёмника
@@ -186,9 +196,6 @@ float freq_to_stripe = NUM_LEDS / 40; // /2 так как симметрия, и
 #include "FastLED.h"
 CRGB leds[NUM_LEDS];
 
-// #include "GyverButton.h"
-// GButton butt1(BTN_PIN);
-
 #include "IRLremote.h"
 CHashIR IRLremote;
 uint32_t IRdata;
@@ -209,7 +216,7 @@ float LsoundLevel, LsoundLevel_f;
 
 float averageLevel = 50;
 int maxLevel = 100;
-int MAX_CH = NUM_LEDS / 2;
+int MAX_CH = 60; //NUM_LEDS / 2;
 int hue;
 unsigned long main_timer, hue_timer, strobe_timer, running_timer, color_timer, rainbow_timer, eeprom_timer;
 float averK = 0.006;
@@ -244,16 +251,11 @@ void setup() {
   if (CURRENT_LIMIT > 0) FastLED.setMaxPowerInVoltsAndMilliamps(5, CURRENT_LIMIT);
   FastLED.setBrightness(BRIGHTNESS);
 
-#if defined(__AVR_ATmega32U4__)   //Выключение светодиодов на Pro Micro
-  TXLED1;                           //на ProMicro выключим и TXLED
-  delay (1000);                     //При питании по usb от компьютера нужна задержка перед выключением RXLED. Если питать от БП, то можно убрать эту строку.
-#endif
   pinMode(MLED_PIN, OUTPUT);        //Режим пина для светодиода режима на выход
   digitalWrite(MLED_PIN, !MLED_ON); //Выключение светодиода режима
 
   pinMode(POT_GND, OUTPUT);
   digitalWrite(POT_GND, LOW);
-  // butt1.setTimeout(900);
 
   IRLremote.begin(IR_PIN);
 
@@ -896,16 +898,6 @@ void analyzeAudio() {
   fht_run();     // process the data in the fht
   fht_mag_log(); // take the output of the fht
 }
-
-// void buttonTick() {
-//   butt1.tick();  // обязательная функция отработки. Должна постоянно опрашиваться
-//   if (butt1.isSingle())                              // если единичное нажатие
-//     if (++this_mode >= MODE_AMOUNT) this_mode = 0;   // изменить режим
-
-//   if (butt1.isHolded()) {     // кнопка удержана
-//     fullLowPass();
-//   }
-// }
 
 void fullLowPass() {
   digitalWrite(MLED_PIN, MLED_ON);   // включить светодиод
