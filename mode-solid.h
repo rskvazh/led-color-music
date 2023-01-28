@@ -1,29 +1,36 @@
-// case 1:
-//   if (millis() - color_timer > COLOR_SPEED) {
-//     color_timer = millis();
-//     if (++this_color > 255) this_color = 0;
-//   }
-//   for (int i = 0; i < NUM_LEDS; i++) leds[i] = CHSV(this_color, LIGHT_SAT, 255);
-//   break;
-
 namespace ModeSolid {
 
-byte LIGHT_COLOR = 0;  // начальный цвет подсветки
-byte LIGHT_SAT = 255;
+#define MODE_SOLID_NUM_HUES 9
 
-void step_f(CRGB *leds, int num_leds, unsigned long elapsed) {
-  for (int i = 0; i < num_leds; i++) {
-    leds[i] = CHSV(LIGHT_COLOR, LIGHT_SAT, 255);
-  }
-}
-
-}
-
-// byte COLOR_SPEED = 100;
-
-// button up
-// LIGHT_SAT = smartIncr(LIGHT_SAT, 20, 0, 255);
-
-const struct Modes mode_s_solid = {
-  ModeSolid::step_f
+byte hues[MODE_SOLID_NUM_HUES] = {
+  247,  // розовый интим
+  215,  // фиолетовый
+  186,  // сине-фиолетовый
+  159,  // синий
+  142,  // голубой
+  123,  // бирюзовый
+  89,   // лайм
+  26,   // warm yellow
+  5     // красный апельсин
 };
+
+byte current_hue_i = 0;
+
+void step(CRGB* leds, int num_leds, unsigned long time_ms) {
+  fill_solid(leds, num_leds, CHSV(hues[current_hue_i], 255, 255));
+}
+
+void forward() {
+  current_hue_i = cycled(current_hue_i + 1, 0, MODE_SOLID_NUM_HUES - 1);
+  Serial.println(hues[current_hue_i]);
+}
+
+void backward() {
+  current_hue_i = cycled(current_hue_i - 1, 0, MODE_SOLID_NUM_HUES - 1);
+  Serial.println(hues[current_hue_i]);
+}
+
+const struct Modes get_mode() {
+  return create_modes_s(step, NULL, forward, backward);
+}
+}
