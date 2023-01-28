@@ -6,16 +6,19 @@
 // Sketch uses 19088 bytes (62%) of program storage space. Maximum is 30720 bytes.
 // Global variables use 1215 bytes (59%) of dynamic memory, leaving 833 bytes for local variables. Maximum is 2048 bytes.
 
+#define FASTLED_ALLOW_INTERRUPTS 1
+#include "FastLED.h"
+
+#include "common.h"
+
 // ----- настройка ИК пульта
 #define REMOTE_TYPE 1  // 0 - без пульта, 1 - пульт от WAVGAT, 2 - пульт от KEYES, 3 - кастомный пульт
 // система может работать С ЛЮБЫМ ИК ПУЛЬТОМ (практически). Коды для своего пульта можно задать начиная со строки 160 в прошивке. Коды пультов определяются скетчем IRtest_2.0, читай инструкцию
 #include "Remote.h"
 
-const byte MODE_GRADIENT = 0;  // old 6:2
-const byte MODE_SOLID = 1;     // old 6:0
-const byte MODE_STATIC = 2;
-const byte MODE_STROBE = 3;
-const byte MODE_MUSIC_RAINBOW = 4;
+#include "mode-gradient.h"
+#include "mode-solid-anim.h"
+#include "mode-solid.h"
 
 const byte OLD_MODE_0 = 11;
 const byte OLD_MODE_1 = 12;
@@ -37,8 +40,7 @@ const byte OLD_MODE_8 = 19;
 // #define NUM_LEDS 467 // Production
 #define NUM_LEDS 120
 
-#define CURRENT_LIMIT 0  // лимит по току в МИЛЛИАМПЕРАХ, автоматически управляет яркостью (пожалей свой блок питания!) 0 - выключить лимит
-byte brightness = 255;   // яркость по умолчанию (0 - 255)
+byte brightness = 255;  // яркость по умолчанию (0 - 255)
 
 // ----- пины подключения
 #define SOUND_R A2       // аналоговый пин вход аудио, правый канал
@@ -93,13 +95,6 @@ uint16_t STROBE_PERIOD = 140;    // период вспышек, миллисе�
 #define STROBE_SAT 0             // насыщенность. Если 0 - цвет будет БЕЛЫЙ при любом цвете (0 - 255)
 byte STROBE_SMOOTH = 200;        // скорость нарастания/угасания вспышки (0 - 255)
 
-// ----- режим подсветки
-byte LIGHT_COLOR = 0;  // начальный цвет подсветки
-byte LIGHT_SAT = 255;  // начальная насыщенность подсветки
-byte COLOR_SPEED = 100;
-int RAINBOW_PERIOD = 1;
-float RAINBOW_STEP_2 = 0.5;
-
 // ----- режим бегущих частот
 byte RUNNING_SPEED = 11;
 
@@ -131,8 +126,6 @@ float freq_to_stripe = NUM_LEDS / 40;  // /2 так как симметрия, �
 
 #include <EEPROMex.h>
 
-#define FASTLED_ALLOW_INTERRUPTS 1
-#include "FastLED.h"
 CRGB leds[NUM_LEDS];
 
 #include "IRLremote.h"
@@ -175,20 +168,19 @@ boolean settings_mode, ONstate = true;
 int8_t freq_strobe_mode;
 int8_t light_mode = 2;
 int freq_max;
-float freq_max_f, rainbow_steps;
+float freq_max_f;
 int freq_f[32];
-int this_color;
 boolean running_flag[3], eeprom_flag;
 
-#define cbi(sfr, bit) (_SFR_BYTE(sfr) &= ~_BV(bit))
-#define sbi(sfr, bit) (_SFR_BYTE(sfr) |= _BV(bit))
 // ------------------------------ ДЛЯ РАЗРАБОТЧИКОВ --------------------------------
 
 void setup() {
   Serial.begin(9600);
-  FastLED.addLeds<WS2812, LED_PIN, GRB>(leds, NUM_LEDS).setCorrection(TypicalLEDStrip);
-  if (CURRENT_LIMIT > 0) FastLED.setMaxPowerInVoltsAndMilliamps(5, CURRENT_LIMIT);
+
+  FastLED.addLeds<WS2812, LED_PIN, GRB>(leds, NUM_LEDS);
+  FastLED.setCorrection(TypicalLEDStrip);
   FastLED.setBrightness(brightness);
+  FastLED.clear(true);
 
   pinMode(MLED_PIN, OUTPUT);         //Режим пина для светодиода режима на выход
   digitalWrite(MLED_PIN, !MLED_ON);  //Выключение светодиода режима
@@ -211,7 +203,6 @@ void setup() {
 #endif
 
   // жуткая магия, меняем частоту оцифровки до 18 кГц
-  // команды на ебучем ассемблере, даже не спрашивайте, как это работает
   // поднимаем частоту опроса аналогового порта до 38.4 кГц, по теореме
   // Котельникова (Найквиста) частота дискретизации будет 19.2 кГц
   // http://yaab-arduino.blogspot.ru/2015/02/fast-sampling-from-analog-input.html
@@ -224,6 +215,7 @@ void setup() {
   if (AUTO_LOW_PASS && !EEPROM_LOW_PASS) {  // если разрешена автонастройка нижнего порога шумов
     autoLowPass();
   }
+
   if (EEPROM_LOW_PASS) {  // восстановить значения шумов из памяти
     LOW_PASS = EEPROM.readInt(70);
     SPEKTR_LOW_PASS = EEPROM.readInt(72);
@@ -241,6 +233,14 @@ void setup() {
   }
 
 #if (SETTINGS_LOG == 1)
+  printSettings()
+#endif
+
+    changeMode(ModeSolid::get_mode());
+}
+
+void printSettings() {
+
   Serial.print(F("currentMode = "));
   Serial.println(currentMode);
   Serial.print(F("freq_strobe_mode = "));
@@ -253,10 +253,10 @@ void setup() {
   Serial.println(MAX_COEF_FREQ);
   Serial.print(F("STROBE_PERIOD = "));
   Serial.println(STROBE_PERIOD);
-  Serial.print(F("LIGHT_SAT = "));
-  Serial.println(LIGHT_SAT);
-  Serial.print(F("RAINBOW_STEP_2 = "));
-  Serial.println(RAINBOW_STEP_2);
+  // Serial.print(F("LIGHT_SAT = "));
+  // Serial.println(LIGHT_SAT);
+  // Serial.print(F("RAINBOW_STEP_2 = "));
+  // Serial.println(RAINBOW_STEP_2);
   Serial.print(F("HUE_START = "));
   Serial.println(HUE_START);
   Serial.print(F("SMOOTH = "));
@@ -265,12 +265,12 @@ void setup() {
   Serial.println(SMOOTH_FREQ);
   Serial.print(F("STROBE_SMOOTH = "));
   Serial.println(STROBE_SMOOTH);
-  Serial.print(F("LIGHT_COLOR = "));
-  Serial.println(LIGHT_COLOR);
-  Serial.print(F("COLOR_SPEED = "));
-  Serial.println(COLOR_SPEED);
-  Serial.print(F("RAINBOW_PERIOD = "));
-  Serial.println(RAINBOW_PERIOD);
+  // Serial.print(F("LIGHT_COLOR = "));
+  // Serial.println(LIGHT_COLOR);
+  // Serial.print(F("COLOR_SPEED = "));
+  // Serial.println(COLOR_SPEED);
+  // Serial.print(F("RAINBOW_PERIOD = "));
+  // Serial.println(RAINBOW_PERIOD);
   Serial.print(F("RUNNING_SPEED = "));
   Serial.println(RUNNING_SPEED);
   Serial.print(F("HUE_STEP = "));
@@ -279,7 +279,6 @@ void setup() {
   Serial.println(EMPTY_BRIGHT);
   Serial.print(F("ONstate = "));
   Serial.println(ONstate);
-#endif
 }
 
 void loop() {
@@ -295,13 +294,20 @@ void loop() {
   eepromTick();  // проверка не пора ли сохранить настройки
 }
 
+Modes current_mode_s;
+
+void changeMode(Modes newMode) {
+  current_mode_s = newMode;
+  if (current_mode_s.activate != NULL) {
+    current_mode_s.activate(leds, NUM_LEDS);
+  }
+}
+
 void mainLoop() {
-  if (millis() - main_timer > MAIN_LOOP) {
-    switch (currentMode) {
-      case MODE_GRADIENT:
-        stepGradient(RAINBOW_PERIOD, RAINBOW_STEP_2);  // 1, 0.5
-        break;
-    }
+  unsigned long time_ms = millis();
+
+  if (time_ms - main_timer > MAIN_LOOP) {
+    current_mode_s.step(leds, NUM_LEDS, time_ms);
 
     // сбрасываем значения
     RsoundLevel = 0;
@@ -440,7 +446,6 @@ void mainLoop() {
       }
       animation();
     }
-    if (currentMode == OLD_MODE_6) animation();
 
     if (!IRLremote.receiving())  // если на ИК приёмник не приходит сигнал (без этого НЕ РАБОТАЕТ!)
       FastLED.show();            // отправить значения на ленту
@@ -448,25 +453,6 @@ void mainLoop() {
     if (currentMode != OLD_MODE_7)  // 7 режиму не нужна очистка!!!
       FastLED.clear();              // очистить массив пикселей
     main_timer = millis();          // сбросить таймер
-  }
-}
-
-// MODE_GRADIENT
-void stepGradient(byte period, float step) {
-  if (millis() - rainbow_timer > 30) {
-    rainbow_timer = millis();
-    this_color += period;
-    if (this_color > 255) this_color = 0;
-    if (this_color < 0) this_color = 255;
-  }
-
-  rainbow_steps = this_color;
-
-  for (int i = 0; i < NUM_LEDS; i++) {
-    leds[i] = CHSV((int)floor(rainbow_steps), 255, 255);
-    rainbow_steps += step;
-    if (rainbow_steps > 255) rainbow_steps = 0;
-    if (rainbow_steps < 0) rainbow_steps = 255;
   }
 }
 
@@ -559,35 +545,6 @@ void animation() {
       else
         for (int i = 0; i < NUM_LEDS; i++) leds[i] = CHSV(EMPTY_COLOR, 255, EMPTY_BRIGHT);
       break;
-    case OLD_MODE_6:
-      switch (light_mode) {
-        case 0:
-          for (int i = 0; i < NUM_LEDS; i++) leds[i] = CHSV(LIGHT_COLOR, LIGHT_SAT, 255);
-          break;
-        case 1:
-          if (millis() - color_timer > COLOR_SPEED) {
-            color_timer = millis();
-            if (++this_color > 255) this_color = 0;
-          }
-          for (int i = 0; i < NUM_LEDS; i++) leds[i] = CHSV(this_color, LIGHT_SAT, 255);
-          break;
-        case 2:
-          if (millis() - rainbow_timer > 30) {
-            rainbow_timer = millis();
-            this_color += RAINBOW_PERIOD;
-            if (this_color > 255) this_color = 0;
-            if (this_color < 0) this_color = 255;
-          }
-          rainbow_steps = this_color;
-          for (int i = 0; i < NUM_LEDS; i++) {
-            leds[i] = CHSV((int)floor(rainbow_steps), 255, 255);
-            rainbow_steps += RAINBOW_STEP_2;
-            if (rainbow_steps > 255) rainbow_steps = 0;
-            if (rainbow_steps < 0) rainbow_steps = 255;
-          }
-          break;
-      }
-      break;
     case OLD_MODE_7:
       switch (freq_strobe_mode) {
         case 0:
@@ -645,20 +602,6 @@ void SILENCE() {
   for (int i = 0; i < NUM_LEDS; i++) leds[i] = CHSV(EMPTY_COLOR, 255, EMPTY_BRIGHT);
 }
 
-// вспомогательная функция, изменяет величину value на шаг incr в пределах minimum.. maximum
-int smartIncr(int value, int incr_step, int mininmum, int maximum) {
-  int val_buf = value + incr_step;
-  val_buf = constrain(val_buf, mininmum, maximum);
-  return val_buf;
-}
-
-float smartIncrFloat(float value, float incr_step, float mininmum, float maximum) {
-  float val_buf = value + incr_step;
-  val_buf = constrain(val_buf, mininmum, maximum);
-  return val_buf;
-}
-
-#if REMOTE_TYPE != 0
 void remoteTick() {
   if (IRLremote.available()) {
     auto data = IRLremote.read();
@@ -671,31 +614,34 @@ void remoteTick() {
     switch (IRdata) {
       // режимы
       case BUTT_1:
-        currentMode = MODE_GRADIENT;
+        currentMode = 255;
+        changeMode(ModeGradient::get_mode());
         break;
       case BUTT_2:
-        currentMode = OLD_MODE_1;
+        currentMode = 255;
+        changeMode(ModeSolidAnim::mode);
         break;
       case BUTT_3:
-        currentMode = OLD_MODE_2;
+        currentMode = 255;
+        changeMode(ModeSolid::get_mode());
         break;
       case BUTT_4:
-        currentMode = OLD_MODE_3;
+        FastLED.setCorrection(TypicalLEDStrip);
         break;
       case BUTT_5:
-        currentMode = OLD_MODE_4;
+        FastLED.setCorrection(Typical8mmPixel);
         break;
       case BUTT_6:
-        currentMode = OLD_MODE_5;
+        FastLED.setCorrection(UncorrectedColor);
         break;
       case BUTT_7:
-        currentMode = OLD_MODE_6;
+
         break;
       case BUTT_8:
-        currentMode = OLD_MODE_7;
+
         break;
       case BUTT_9:
-        currentMode = OLD_MODE_8;
+
         break;
       case BUTT_0:
         fullLowPass();
@@ -744,19 +690,6 @@ void remoteTick() {
             case OLD_MODE_5:
               STROBE_PERIOD = smartIncr(STROBE_PERIOD, 20, 1, 1000);
               break;
-            case OLD_MODE_6:
-              switch (light_mode) {
-                case 0:
-                  LIGHT_SAT = smartIncr(LIGHT_SAT, 20, 0, 255);
-                  break;
-                case 1:
-                  LIGHT_SAT = smartIncr(LIGHT_SAT, 20, 0, 255);
-                  break;
-                case 2:
-                  RAINBOW_STEP_2 = smartIncrFloat(RAINBOW_STEP_2, 0.5, 0.5, 10);
-                  break;
-              }
-              break;
             case OLD_MODE_7:
               MAX_COEF_FREQ = smartIncrFloat(MAX_COEF_FREQ, 0.1, 0.0, 10);
               break;
@@ -789,19 +722,6 @@ void remoteTick() {
             case OLD_MODE_5:
               STROBE_PERIOD = smartIncr(STROBE_PERIOD, -20, 1, 1000);
               break;
-            case OLD_MODE_6:
-              switch (light_mode) {
-                case 0:
-                  LIGHT_SAT = smartIncr(LIGHT_SAT, -20, 0, 255);
-                  break;
-                case 1:
-                  LIGHT_SAT = smartIncr(LIGHT_SAT, -20, 0, 255);
-                  break;
-                case 2:
-                  RAINBOW_STEP_2 = smartIncrFloat(RAINBOW_STEP_2, -0.5, 0.5, 10);
-                  break;
-              }
-              break;
             case OLD_MODE_7:
               MAX_COEF_FREQ = smartIncrFloat(MAX_COEF_FREQ, -0.1, 0.0, 10);
               break;
@@ -812,6 +732,10 @@ void remoteTick() {
         }
         break;
       case BUTT_LEFT:
+        if (current_mode_s.backward != NULL) {
+          current_mode_s.backward();
+        }
+
         if (settings_mode) {
           // ВЛЕВО общие настройки
           brightness = smartIncr(brightness, -20, 0, 255);
@@ -830,19 +754,6 @@ void remoteTick() {
             case OLD_MODE_5:
               STROBE_SMOOTH = smartIncr(STROBE_SMOOTH, -20, 0, 255);
               break;
-            case OLD_MODE_6:
-              switch (light_mode) {
-                case 0:
-                  LIGHT_COLOR = smartIncr(LIGHT_COLOR, -10, 0, 255);
-                  break;
-                case 1:
-                  COLOR_SPEED = smartIncr(COLOR_SPEED, -10, 0, 255);
-                  break;
-                case 2:
-                  RAINBOW_PERIOD = smartIncr(RAINBOW_PERIOD, -1, -20, 20);
-                  break;
-              }
-              break;
             case OLD_MODE_7:
               RUNNING_SPEED = smartIncr(RUNNING_SPEED, -10, 1, 255);
               break;
@@ -853,6 +764,10 @@ void remoteTick() {
         }
         break;
       case BUTT_RIGHT:
+        if (current_mode_s.forward != NULL) {
+          current_mode_s.forward();
+        }
+
         if (settings_mode) {
           // ВПРАВО общие настройки
           brightness = smartIncr(brightness, 20, 0, 255);
@@ -871,19 +786,6 @@ void remoteTick() {
             case OLD_MODE_5:
               STROBE_SMOOTH = smartIncr(STROBE_SMOOTH, 20, 0, 255);
               break;
-            case OLD_MODE_6:
-              switch (light_mode) {
-                case 0:
-                  LIGHT_COLOR = smartIncr(LIGHT_COLOR, 10, 0, 255);
-                  break;
-                case 1:
-                  COLOR_SPEED = smartIncr(COLOR_SPEED, 10, 0, 255);
-                  break;
-                case 2:
-                  RAINBOW_PERIOD = smartIncr(RAINBOW_PERIOD, 1, -20, 20);
-                  break;
-              }
-              break;
             case OLD_MODE_7:
               RUNNING_SPEED = smartIncr(RUNNING_SPEED, 10, 1, 255);
               break;
@@ -900,7 +802,6 @@ void remoteTick() {
     ir_flag = false;
   }
 }
-#endif
 
 void autoLowPass() {
   // для режима VU
@@ -955,6 +856,7 @@ void fullLowPass() {
   FastLED.setBrightness(brightness);  // вернуть яркость
   digitalWrite(MLED_PIN, !MLED_ON);   // выключить светодиод
 }
+
 void updateEEPROM() {
   EEPROM.updateByte(1, currentMode);
   EEPROM.updateByte(2, freq_strobe_mode);
@@ -962,20 +864,21 @@ void updateEEPROM() {
   EEPROM.updateInt(4, RAINBOW_STEP);
   EEPROM.updateFloat(8, MAX_COEF_FREQ);
   EEPROM.updateInt(12, STROBE_PERIOD);
-  EEPROM.updateInt(16, LIGHT_SAT);
-  EEPROM.updateFloat(20, RAINBOW_STEP_2);
+  // EEPROM.updateInt(16, LIGHT_SAT);
+  // EEPROM.updateFloat(20, RAINBOW_STEP_2);
   EEPROM.updateInt(24, HUE_START);
   EEPROM.updateFloat(28, SMOOTH);
   EEPROM.updateFloat(32, SMOOTH_FREQ);
   EEPROM.updateInt(36, STROBE_SMOOTH);
-  EEPROM.updateInt(40, LIGHT_COLOR);
-  EEPROM.updateInt(44, COLOR_SPEED);
-  EEPROM.updateInt(48, RAINBOW_PERIOD);
+  // EEPROM.updateInt(40, LIGHT_COLOR);
+  // EEPROM.updateInt(44, COLOR_SPEED);
+  // EEPROM.updateInt(48, RAINBOW_PERIOD);
   EEPROM.updateInt(52, RUNNING_SPEED);
   EEPROM.updateInt(56, HUE_STEP);
   EEPROM.updateInt(60, EMPTY_BRIGHT);
   if (KEEP_STATE) EEPROM.updateByte(64, ONstate);
 }
+
 void readEEPROM() {
   currentMode = EEPROM.readByte(1);
   freq_strobe_mode = EEPROM.readByte(2);
@@ -983,20 +886,21 @@ void readEEPROM() {
   RAINBOW_STEP = EEPROM.readInt(4);
   MAX_COEF_FREQ = EEPROM.readFloat(8);
   STROBE_PERIOD = EEPROM.readInt(12);
-  LIGHT_SAT = EEPROM.readInt(16);
-  RAINBOW_STEP_2 = EEPROM.readFloat(20);
+  // LIGHT_SAT = EEPROM.readInt(16);
+  // RAINBOW_STEP_2 = EEPROM.readFloat(20);
   HUE_START = EEPROM.readInt(24);
   SMOOTH = EEPROM.readFloat(28);
   SMOOTH_FREQ = EEPROM.readFloat(32);
   STROBE_SMOOTH = EEPROM.readInt(36);
-  LIGHT_COLOR = EEPROM.readInt(40);
-  COLOR_SPEED = EEPROM.readInt(44);
-  RAINBOW_PERIOD = EEPROM.readInt(48);
+  // LIGHT_COLOR = EEPROM.readInt(40);
+  // COLOR_SPEED = EEPROM.readInt(44);
+  // RAINBOW_PERIOD = EEPROM.readInt(48);
   RUNNING_SPEED = EEPROM.readInt(52);
   HUE_STEP = EEPROM.readInt(56);
   EMPTY_BRIGHT = EEPROM.readInt(60);
   if (KEEP_STATE) ONstate = EEPROM.readByte(64);
 }
+
 void eepromTick() {
   if (eeprom_flag)
     if (millis() - eeprom_timer > 30000) {  // 30 секунд после последнего нажатия с пульта

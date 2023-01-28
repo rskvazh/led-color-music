@@ -1,28 +1,35 @@
 namespace ModeGradient {
 
+unsigned long last_color_time_ms;
+
 int this_color;
-float rainbow_steps;
 
-byte period = 1;   // RAINBOW_PERIOD
-float step = 0.5;  // RAINBOW_STEP_2
+byte period = 1;
+float rainbow_step = 0.5;
 
-void step_f(CRGB *leds, int num_leds, unsigned long elapsed) {
-  if (elapsed > 30) {
-    this_color += period;
-    if (this_color > 255) this_color = 0;
-    if (this_color < 0) this_color = 255;
+void activate(CRGB* leds, int num_leds) {
+  this_color = 0;
+}
+
+void step(CRGB* leds, int num_leds, unsigned long time_ms) {
+  if (time_ms - last_color_time_ms > 30) {
+    last_color_time_ms = time_ms;
+
+    this_color = cycled(this_color + period, 0, 255);
   }
 
-  rainbow_steps = this_color;
+  float rainbow_steps = this_color;
 
   for (int i = 0; i < num_leds; i++) {
     leds[i] = CHSV((int)floor(rainbow_steps), 255, 255);
-    rainbow_steps += step;
-    if (rainbow_steps > 255) rainbow_steps = 0;
-    if (rainbow_steps < 0) rainbow_steps = 255;
+
+    rainbow_steps = cycled(rainbow_steps + rainbow_step, 0, 255);
   }
 }
 
+const struct Modes get_mode() {
+  return create_modes_s(step, activate);
+}
 }
 
 // btn up
@@ -30,7 +37,3 @@ void step_f(CRGB *leds, int num_leds, unsigned long elapsed) {
 
 // btn left
 // RAINBOW_PERIOD = smartIncr(RAINBOW_PERIOD, -1, -20, 20);
-
-const struct Modes mode_s_gradient = {
-  ModeGradient::step_f
-};
