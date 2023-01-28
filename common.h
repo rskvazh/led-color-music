@@ -5,20 +5,23 @@ typedef void (*ModeActivateFunction)(CRGB *leds, int num_leds);
 typedef void (*ModeStepFunction)(CRGB *leds, int num_leds, unsigned long time_ms);
 typedef void (*ModeForwardFunction)();
 typedef void (*ModeBackwardFunction)();
+typedef void (*ModeActionFunction)();
 
 struct Modes {
   ModeActivateFunction activate;
   ModeStepFunction step;
   ModeForwardFunction forward;
   ModeBackwardFunction backward;
+  ModeActionFunction action;
 };
 
-const Modes create_modes_s(ModeStepFunction step, ModeActivateFunction activate = NULL, ModeForwardFunction forward = NULL, ModeBackwardFunction backward = NULL) {
+const Modes create_modes_s(ModeStepFunction step, ModeActivateFunction activate = NULL, ModeForwardFunction forward = NULL, ModeBackwardFunction backward = NULL, ModeActionFunction action = NULL) {
   const struct Modes mode = {
     .activate = activate,
     .step = step,
     .forward = forward,
-    .backward = backward
+    .backward = backward,
+    .action = action
   };
   return mode;
 }

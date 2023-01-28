@@ -6,7 +6,7 @@
 // Sketch uses 19088 bytes (62%) of program storage space. Maximum is 30720 bytes.
 // Global variables use 1215 bytes (59%) of dynamic memory, leaving 833 bytes for local variables. Maximum is 2048 bytes.
 
-#define FASTLED_ALLOW_INTERRUPTS 1
+// #define FASTLED_ALLOW_INTERRUPTS 1
 #include "FastLED.h"
 
 #include "common.h"
@@ -19,13 +19,16 @@
 #include "mode-gradient.h"
 #include "mode-solid-anim.h"
 #include "mode-solid.h"
+#include "mode-strobe.h"
+
+#define DEFAULT_MODE ModeStrobe::get_mode()
 
 const byte OLD_MODE_0 = 11;
 const byte OLD_MODE_1 = 12;
 const byte OLD_MODE_2 = 13;
 const byte OLD_MODE_3 = 14;
 const byte OLD_MODE_4 = 15;
-const byte OLD_MODE_5 = 16;
+// const byte OLD_MODE_5 = 16; // STROBE
 const byte OLD_MODE_6 = 17;
 const byte OLD_MODE_7 = 18;
 const byte OLD_MODE_8 = 19;
@@ -88,12 +91,6 @@ float MAX_COEF_FREQ = 1.2;     // коэффициент порога для "в
 #define MID_COLOR HUE_GREEN    // цвет средних
 #define HIGH_COLOR HUE_YELLOW  // цвет высоких
 
-// ----- режим стробоскопа
-uint16_t STROBE_PERIOD = 140;    // период вспышек, миллисекунды
-#define STROBE_DUTY 20           // скважность вспышек (1 - 99) - отношение времени вспышки ко времени темноты
-#define STROBE_COLOR HUE_YELLOW  // цвет стробоскопа
-#define STROBE_SAT 0             // насыщенность. Если 0 - цвет будет БЕЛЫЙ при любом цвете (0 - 255)
-byte STROBE_SMOOTH = 200;        // скорость нарастания/угасания вспышки (0 - 255)
 
 // ----- режим бегущих частот
 byte RUNNING_SPEED = 11;
@@ -150,7 +147,7 @@ float averageLevel = 50;
 int maxLevel = 100;
 int MAX_CH = 60;  //NUM_LEDS / 2;
 int hue;
-unsigned long main_timer, hue_timer, strobe_timer, running_timer, color_timer, rainbow_timer, eeprom_timer;
+unsigned long main_timer, hue_timer, running_timer, color_timer, rainbow_timer, eeprom_timer;
 float averK = 0.006;
 byte count;
 float index = (float)255 / MAX_CH;  // коэффициент перевода для палитры
@@ -159,10 +156,10 @@ byte low_pass;
 int RcurrentLevel, LcurrentLevel;
 int colorMusic[3];
 float colorMusic_f[3], colorMusic_aver[3];
-boolean colorMusicFlash[3], strobeUp_flag, strobeDwn_flag;
-byte currentMode = MODE_GRADIENT;
-int thisBright[3], strobe_bright = 0;
-unsigned int light_time = STROBE_PERIOD * STROBE_DUTY / 100;
+boolean colorMusicFlash[3];
+byte currentMode = 255;
+int thisBright[3];
+
 volatile boolean ir_flag;
 boolean settings_mode, ONstate = true;
 int8_t freq_strobe_mode;
@@ -236,7 +233,7 @@ void setup() {
   printSettings()
 #endif
 
-    changeMode(ModeSolid::get_mode());
+    changeMode(DEFAULT_MODE);
 }
 
 void printSettings() {
@@ -251,8 +248,8 @@ void printSettings() {
   Serial.println(RAINBOW_STEP);
   Serial.print(F("MAX_COEF_FREQ = "));
   Serial.println(MAX_COEF_FREQ);
-  Serial.print(F("STROBE_PERIOD = "));
-  Serial.println(STROBE_PERIOD);
+  // Serial.print(F("STROBE_PERIOD = "));
+  // Serial.println(STROBE_PERIOD);
   // Serial.print(F("LIGHT_SAT = "));
   // Serial.println(LIGHT_SAT);
   // Serial.print(F("RAINBOW_STEP_2 = "));
@@ -263,8 +260,8 @@ void printSettings() {
   Serial.println(SMOOTH);
   Serial.print(F("SMOOTH_FREQ = "));
   Serial.println(SMOOTH_FREQ);
-  Serial.print(F("STROBE_SMOOTH = "));
-  Serial.println(STROBE_SMOOTH);
+  // Serial.print(F("STROBE_SMOOTH = "));
+  // Serial.println(STROBE_SMOOTH);
   // Serial.print(F("LIGHT_COLOR = "));
   // Serial.println(LIGHT_COLOR);
   // Serial.print(F("COLOR_SPEED = "));
@@ -275,8 +272,8 @@ void printSettings() {
   Serial.println(RUNNING_SPEED);
   Serial.print(F("HUE_STEP = "));
   Serial.println(HUE_STEP);
-  Serial.print(F("EMPTY_BRIGHT = "));
-  Serial.println(EMPTY_BRIGHT);
+  // Serial.print(F("EMPTY_BRIGHT = "));
+  // Serial.println(EMPTY_BRIGHT);
   Serial.print(F("ONstate = "));
   Serial.println(ONstate);
 }
@@ -418,41 +415,15 @@ void mainLoop() {
       }
       animation();
     }
-    if (currentMode == OLD_MODE_5) {
-      if ((long)millis() - strobe_timer > STROBE_PERIOD) {
-        strobe_timer = millis();
-        strobeUp_flag = true;
-        strobeDwn_flag = false;
-      }
-      if ((long)millis() - strobe_timer > light_time) {
-        strobeDwn_flag = true;
-      }
-      if (strobeUp_flag) {                 // если настало время пыхнуть
-        if (strobe_bright < 255)           // если яркость не максимальная
-          strobe_bright += STROBE_SMOOTH;  // увелчить
-        if (strobe_bright > 255) {         // если пробили макс. яркость
-          strobe_bright = 255;             // оставить максимум
-          strobeUp_flag = false;           // флаг опустить
-        }
-      }
 
-      if (strobeDwn_flag) {                // гаснем
-        if (strobe_bright > 0)             // если яркость не минимальная
-          strobe_bright -= STROBE_SMOOTH;  // уменьшить
-        if (strobe_bright < 0) {           // если пробили мин. яркость
-          strobeDwn_flag = false;
-          strobe_bright = 0;  // оставить 0
-        }
-      }
-      animation();
+    if (!IRLremote.receiving()) {
+      FastLED.show();
     }
 
-    if (!IRLremote.receiving())  // если на ИК приёмник не приходит сигнал (без этого НЕ РАБОТАЕТ!)
-      FastLED.show();            // отправить значения на ленту
+    // if (currentMode != OLD_MODE_7)  // 7 режиму не нужна очистка!!!
+    // FastLED.clear();              // очистить массив пикселей
 
-    if (currentMode != OLD_MODE_7)  // 7 режиму не нужна очистка!!!
-      FastLED.clear();              // очистить массив пикселей
-    main_timer = millis();          // сбросить таймер
+    main_timer = millis();  // сбросить таймер
   }
 }
 
@@ -539,12 +510,6 @@ void animation() {
           break;
       }
       break;
-    case OLD_MODE_5:
-      if (strobe_bright > 0)
-        for (int i = 0; i < NUM_LEDS; i++) leds[i] = CHSV(STROBE_COLOR, STROBE_SAT, strobe_bright);
-      else
-        for (int i = 0; i < NUM_LEDS; i++) leds[i] = CHSV(EMPTY_COLOR, 255, EMPTY_BRIGHT);
-      break;
     case OLD_MODE_7:
       switch (freq_strobe_mode) {
         case 0:
@@ -626,13 +591,14 @@ void remoteTick() {
         changeMode(ModeSolid::get_mode());
         break;
       case BUTT_4:
-        FastLED.setCorrection(TypicalLEDStrip);
+        currentMode = 255;
+        changeMode(ModeStrobe::get_mode());
         break;
       case BUTT_5:
-        FastLED.setCorrection(Typical8mmPixel);
+        
         break;
       case BUTT_6:
-        FastLED.setCorrection(UncorrectedColor);
+        
         break;
       case BUTT_7:
 
@@ -664,8 +630,11 @@ void remoteTick() {
         }
         break;
       case BUTT_OK:
-        digitalWrite(MLED_PIN, settings_mode ^ MLED_ON);
-        settings_mode = !settings_mode;
+        if (current_mode_s.action != NULL) {
+          current_mode_s.action();
+        }
+        // digitalWrite(MLED_PIN, settings_mode ^ MLED_ON);
+        // settings_mode = !settings_mode;
         break;
       case BUTT_UP:
         brightness = smartIncr(brightness, 17, 0, 255);
@@ -686,9 +655,6 @@ void remoteTick() {
             case OLD_MODE_3:
             case OLD_MODE_4:
               MAX_COEF_FREQ = smartIncrFloat(MAX_COEF_FREQ, 0.1, 0, 5);
-              break;
-            case OLD_MODE_5:
-              STROBE_PERIOD = smartIncr(STROBE_PERIOD, 20, 1, 1000);
               break;
             case OLD_MODE_7:
               MAX_COEF_FREQ = smartIncrFloat(MAX_COEF_FREQ, 0.1, 0.0, 10);
@@ -719,9 +685,6 @@ void remoteTick() {
             case OLD_MODE_4:
               MAX_COEF_FREQ = smartIncrFloat(MAX_COEF_FREQ, -0.1, 0, 5);
               break;
-            case OLD_MODE_5:
-              STROBE_PERIOD = smartIncr(STROBE_PERIOD, -20, 1, 1000);
-              break;
             case OLD_MODE_7:
               MAX_COEF_FREQ = smartIncrFloat(MAX_COEF_FREQ, -0.1, 0.0, 10);
               break;
@@ -751,9 +714,6 @@ void remoteTick() {
             case OLD_MODE_4:
               SMOOTH_FREQ = smartIncrFloat(SMOOTH_FREQ, -0.05, 0.05, 1);
               break;
-            case OLD_MODE_5:
-              STROBE_SMOOTH = smartIncr(STROBE_SMOOTH, -20, 0, 255);
-              break;
             case OLD_MODE_7:
               RUNNING_SPEED = smartIncr(RUNNING_SPEED, -10, 1, 255);
               break;
@@ -782,9 +742,6 @@ void remoteTick() {
             case OLD_MODE_3:
             case OLD_MODE_4:
               SMOOTH_FREQ = smartIncrFloat(SMOOTH_FREQ, 0.05, 0.05, 1);
-              break;
-            case OLD_MODE_5:
-              STROBE_SMOOTH = smartIncr(STROBE_SMOOTH, 20, 0, 255);
               break;
             case OLD_MODE_7:
               RUNNING_SPEED = smartIncr(RUNNING_SPEED, 10, 1, 255);
@@ -863,13 +820,13 @@ void updateEEPROM() {
   EEPROM.updateByte(3, light_mode);
   EEPROM.updateInt(4, RAINBOW_STEP);
   EEPROM.updateFloat(8, MAX_COEF_FREQ);
-  EEPROM.updateInt(12, STROBE_PERIOD);
+  // EEPROM.updateInt(12, STROBE_PERIOD);
   // EEPROM.updateInt(16, LIGHT_SAT);
   // EEPROM.updateFloat(20, RAINBOW_STEP_2);
   EEPROM.updateInt(24, HUE_START);
   EEPROM.updateFloat(28, SMOOTH);
   EEPROM.updateFloat(32, SMOOTH_FREQ);
-  EEPROM.updateInt(36, STROBE_SMOOTH);
+  // EEPROM.updateInt(36, STROBE_SMOOTH);
   // EEPROM.updateInt(40, LIGHT_COLOR);
   // EEPROM.updateInt(44, COLOR_SPEED);
   // EEPROM.updateInt(48, RAINBOW_PERIOD);
@@ -885,13 +842,13 @@ void readEEPROM() {
   light_mode = EEPROM.readByte(3);
   RAINBOW_STEP = EEPROM.readInt(4);
   MAX_COEF_FREQ = EEPROM.readFloat(8);
-  STROBE_PERIOD = EEPROM.readInt(12);
+  // STROBE_PERIOD = EEPROM.readInt(12);
   // LIGHT_SAT = EEPROM.readInt(16);
   // RAINBOW_STEP_2 = EEPROM.readFloat(20);
   HUE_START = EEPROM.readInt(24);
   SMOOTH = EEPROM.readFloat(28);
   SMOOTH_FREQ = EEPROM.readFloat(32);
-  STROBE_SMOOTH = EEPROM.readInt(36);
+  // STROBE_SMOOTH = EEPROM.readInt(36);
   // LIGHT_COLOR = EEPROM.readInt(40);
   // COLOR_SPEED = EEPROM.readInt(44);
   // RAINBOW_PERIOD = EEPROM.readInt(48);
