@@ -24,8 +24,9 @@ void step(CRGB* leds, int num_leds, unsigned long time_ms) {
   }
 }
 
-const struct Modes mode = create_modes_s(step, activate);
-const struct Modes* mode_ptr = &mode;
+const struct Modes get_mode() {
+  return create_modes_s(step, activate);
+}
 }
 
 // byte COLOR_SPEED = 100;
